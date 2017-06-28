@@ -14,13 +14,11 @@ import java.util.Arrays;
 public class Word_Count {
     public static void main(String[] args){
         SparkConf conf = new SparkConf()
-                .setMaster("spark://")
+                .setMaster("local")
                 .setAppName("WordCount");
 
-//        System.setProperty("hadoop.home.dir", "D:\\jiabao\\hadoop-2.7.3");
-
         JavaSparkContext context = new JavaSparkContext(conf);
-        JavaRDD<String> lines = context.textFile("C:\\Users\\於建\\Desktop\\WordCount.txt");
+        JavaRDD<String> lines = context.textFile("E:\\WordCount.txt");
 
         JavaPairRDD<String,Integer> pairRDD = lines.flatMap(line -> Arrays.asList(line.split(" ")).iterator())
                 .mapToPair(word->new Tuple2<String, Integer>(word,1))
