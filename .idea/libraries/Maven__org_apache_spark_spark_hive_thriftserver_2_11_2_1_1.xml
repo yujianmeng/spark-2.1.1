@@ -1,0 +1,11 @@
+<component name="libraryTable">
+  <library name="Maven: org.apache.spark:spark-hive-thriftserver_2.11:2.1.1">
+    <CLASSES />
+    <JAVADOC>
+      <root url="jar://$MAVEN_REPOSITORY$/org/apache/spark/spark-hive-thriftserver_2.11/2.1.1/spark-hive-thriftserver_2.11-2.1.1-javadoc.jar!/" />
+    </JAVADOC>
+    <SOURCES>
+      <root url="jar://$MAVEN_REPOSITORY$/org/apache/spark/spark-hive-thriftserver_2.11/2.1.1/spark-hive-thriftserver_2.11-2.1.1-sources.jar!/" />
+    </SOURCES>
+  </library>
+</component>
