@@ -652,6 +652,7 @@ private[deploy] class Master(
   /**
    * Schedule and launch executors on workers
    */
+  //在worker上调度和启动executors
   private def startExecutorsOnWorkers(): Unit = {
     // Right now this is a very simple FIFO scheduler. We keep trying to fit in the first app
     // in the queue, then the second app, etc.
@@ -700,7 +701,11 @@ private[deploy] class Master(
    * Schedule the currently available resources among waiting apps. This method will be called
    * every time a new app joins or resource availability changes.
    */
+  //上面的官方注释已经写的很清楚，调度当前可用的资源给等待调度的Applications
+  // 每有一个app加入队列或者资源的可用情况发生改变，这个方法将被调用
   private def schedule(): Unit = {
+    //首先判断当前Master的状态是否是Alive，如果不是，则不做任何操作
+    //就是说除了Alive状态以外的Master是不做资源调度的
     if (state != RecoveryState.ALIVE) {
       return
     }
@@ -718,13 +723,19 @@ private[deploy] class Master(
         val worker = shuffledAliveWorkers(curPos)
         numWorkersVisited += 1
         if (worker.memoryFree >= driver.desc.mem && worker.coresFree >= driver.desc.cores) {
+          //在worker上启动driver
           launchDriver(worker, driver)
+          //将当前driver从等待调度的waitingDrivers中删除
           waitingDrivers -= driver
           launched = true
         }
+        //指针指向下一个worker
         curPos = (curPos + 1) % numWorkersAlive
       }
     }
+    //在worker上启动executors（核心，非常重要）
+    //当程序运行到这一步时，表明waitingDrivers中的所有driver都已经在worker中launch
+    //否则将会继续上面的循环
     startExecutorsOnWorkers()
   }
 
@@ -987,11 +998,17 @@ private[deploy] class Master(
     new DriverInfo(now, newDriverId(date), desc, date)
   }
 
+  //在某一个worker上启动driver
   private def launchDriver(worker: WorkerInfo, driver: DriverInfo) {
     logInfo("Launching driver " + driver.id + " on worker " + worker.id)
+    //将driver的信息添加到worker的缓存结构中
+    //worker中已经使用的内存和CPU资源需要加上driver运行所需要的内存的CPU
     worker.addDriver(driver)
+    //对应的，也将worker的信息添加到driver的缓存结构中
     driver.worker = Some(worker)
+    //给worker发送LaunchDriver消息，让worker启动driver
     worker.endpoint.send(LaunchDriver(driver.id, driver.desc))
+    //将driver的状态改为running
     driver.state = DriverState.RUNNING
   }
 
