@@ -154,9 +154,14 @@ private[spark] class Executor(
       attemptNumber: Int,
       taskName: String,
       serializedTask: ByteBuffer): Unit = {
+
+    //首先创建一个TaskRunner对象，TaskRunner实现了Java中的Runnable的接口，实际上是将task封装在taskRunner对象中
     val tr = new TaskRunner(context, taskId = taskId, attemptNumber = attemptNumber, taskName,
       serializedTask)
+    //将taskRunner放入内存缓存中
     runningTasks.put(taskId, tr)
+    //threadPool是executor内部的一个线程池
+    //将taskRunner丢到线程池中进行执行，线程池是实现了排队机制的，如果线程池暂时没有空闲，丢进来的线程需要等待
     threadPool.execute(tr)
   }
 
