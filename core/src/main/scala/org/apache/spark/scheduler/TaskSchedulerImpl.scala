@@ -169,10 +169,15 @@ private[spark] class TaskSchedulerImpl(
     waitBackendReady()
   }
 
+  //提交taskSet
+  //TaskScheduler提交task的入口
   override def submitTasks(taskSet: TaskSet) {
     val tasks = taskSet.tasks
     logInfo("Adding task set " + taskSet.id + " with " + tasks.length + " tasks")
     this.synchronized {
+      //每一个TaskSet都会创建一个TaskSetManager
+      //TaskSetManager会负责相应的TaskSet中task状态的监视和管理，负责追踪每一个Task，如果task运行失败，会负责重试task，直到
+      //超过重试的次数，并且会为通过延迟调度为这个TaskSet处理本地化调度机制
       val manager = createTaskSetManager(taskSet, maxTaskFailures)
       val stage = taskSet.stageId
       val stageTaskSets =
@@ -202,6 +207,7 @@ private[spark] class TaskSchedulerImpl(
       }
       hasReceivedTask = true
     }
+    //这个SchedulerBackend就是sparkContext在初始化的时候为SchedulerTask创建的SchedulerBackend
     backend.reviveOffers()
   }
 
@@ -256,19 +262,31 @@ private[spark] class TaskSchedulerImpl(
       availableCpus: Array[Int],
       tasks: IndexedSeq[ArrayBuffer[TaskDescription]]) : Boolean = {
     var launchedTask = false
+    //遍历所有的WorkerOffer（WorkerOffer中封装的就是executor可用的CPU资源）
     for (i <- 0 until shuffledOffers.size) {
       val execId = shuffledOffers(i).executorId
       val host = shuffledOffers(i).host
+      //如果当前executor可用的CPU数量大于或等于每个task所需要的CPU（默认是1），则继续
       if (availableCpus(i) >= CPUS_PER_TASK) {
         try {
+          //调用TaskSetManager的resourceOffer方法去找到在这个executor上，使用这种本地化级别能够启动taskSet中的那些tasks
+          //找到这些tasks后就进行遍历
           for (task <- taskSet.resourceOffer(execId, host, maxLocality)) {
+            //给当前的executor加上要启动的task
             tasks(i) += task
+            //到这里task的分配算法已经完成
+            //可以用本地化级别这种模型去优化task的分配和启动，优先希望在最佳本地化的地方启动task
+
+
+            //将相应的分配信息加入到内存缓存中
             val tid = task.taskId
             taskIdToTaskSetManager(tid) = taskSet
             taskIdToExecutorId(tid) = execId
             executorIdToRunningTaskIds(execId).add(tid)
             availableCpus(i) -= CPUS_PER_TASK
             assert(availableCpus(i) >= 0)
+
+            //标记为true
             launchedTask = true
           }
         } catch {
@@ -288,6 +306,7 @@ private[spark] class TaskSchedulerImpl(
    * sets for tasks in order of priority. We fill each node with tasks in a round-robin manner so
    * that tasks are balanced across the cluster.
    */
+  //传入的是这个app所有可用的executors，并且将其封装成了WorkerOffer，每个WorkerOffer代表了每个executor可用的CPU资源
   def resourceOffers(offers: IndexedSeq[WorkerOffer]): Seq[Seq[TaskDescription]] = synchronized {
     // Mark each slave as alive and remember its hostname
     // Also track if new executor is added
@@ -309,10 +328,14 @@ private[spark] class TaskSchedulerImpl(
     }
 
     // Randomly shuffle offers to avoid always placing tasks on the same set of workers.
+    //将可用的executor进行shuffle，也就是说进行打散，尽量的做到可以负载均衡
     val shuffledOffers = Random.shuffle(offers)
     // Build a list of tasks to assign to each worker.
+    //针对WorkerOffer创建出一堆的东西，比如创建分配到每个worker上的tasks
     val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription](o.cores))
     val availableCpus = shuffledOffers.map(o => o.cores).toArray
+
+    //从调度池中取出排好序的TaskSets(这里其实是TaskManager)
     val sortedTaskSets = rootPool.getSortedTaskSetQueue
     for (taskSet <- sortedTaskSets) {
       logDebug("parentName: %s, name: %s, runningTasks: %s".format(
@@ -325,11 +348,32 @@ private[spark] class TaskSchedulerImpl(
     // Take each TaskSet in our scheduling order, and then offer it each node in increasing order
     // of locality levels so that it gets a chance to launch local tasks on all of them.
     // NOTE: the preferredLocality order: PROCESS_LOCAL, NODE_LOCAL, NO_PREF, RACK_LOCAL, ANY
+    //在调度队列中遍历每一个TaskSet,并且为其在node上提供递增的本地化优先级，使他们有机会在本地启动tasks
+
+    //以下本地化级别从小到大，性能从好到坏
+    //PROCESS_LOCAL:.task和partition在同一个executor
+    //NODE_LOCAL：task和partition在同一个worker上
+    //NO_PREF：没有本地化级别
+    //RACK_LOCAL：机架级别本地化
+    //ANY
+
+    //任务分配算法的核心
+    //遍历所有的taskset，以及本地化级别myLocalityLevels
+    //本地化级别代表了任务执行的效率。前面的本地化性能好于后面。
+    // 对当前taskset优先使用最小的本地化级别，然后将taskset的task在executor上启动。
+    // 该段代码从最小的本地化级别也就是最优的本地化级别开始，launchedTask如果false也就是该级别下不能启动task，
+    // 那么跳出while循环，进入下一个优先级级别的本地化级别，直到最后，将task都分配给executor。
+
+    //遍历每一个TaskSet
     for (taskSet <- sortedTaskSets) {
       var launchedAnyTask = false
       var launchedTaskAtCurrentMaxLocality = false
+      //遍历每一个TaskManager的本地化策略
       for (currentMaxLocality <- taskSet.myLocalityLevels) {
         do {
+          //尝试优先使用最小的本地化级别，，将TaskSet的task在executor上进行启动
+          //如果启动不了则跳出do while循环，进入下一级的本地化级别
+          //以此类推，直到尝试将TaskSet在某些本地化级别下让tasks在executor上全部启动
           launchedTaskAtCurrentMaxLocality = resourceOfferSingleTaskSet(
             taskSet, currentMaxLocality, shuffledOffers, availableCpus, tasks)
           launchedAnyTask |= launchedTaskAtCurrentMaxLocality

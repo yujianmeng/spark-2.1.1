@@ -69,9 +69,12 @@ private[deploy] class ExecutorRunner(
   private var shutdownHook: AnyRef = null
 
   private[worker] def start() {
+    //创建一个Java进程
     workerThread = new Thread("ExecutorRunner for " + fullId) {
+      //进程体
       override def run() { fetchAndRunExecutor() }
     }
+    //启动线程
     workerThread.start()
     // Shutdown hook that kills actors on shutdown.
     shutdownHook = ShutdownHookManager.addShutdownHook { () =>
@@ -142,6 +145,7 @@ private[deploy] class ExecutorRunner(
   private def fetchAndRunExecutor() {
     try {
       // Launch the process
+      //构建ProcessBuilder
       val builder = CommandUtils.buildProcessBuilder(appDesc.command, new SecurityManager(conf),
         memory, sparkHome.getAbsolutePath, substituteVariables)
       val command = builder.command()
@@ -168,6 +172,7 @@ private[deploy] class ExecutorRunner(
       val header = "Spark Executor Command: %s\n%s\n\n".format(
         formattedCommand, "=" * 40)
 
+      //重定向输出流到文件，将executor的InputStream和ErrorStream分别重定向到stdout和errout文件中
       // Redirect its stdout and stderr to files
       val stdout = new File(executorDir, "stdout")
       stdoutAppender = FileAppender(process.getInputStream, stdout, conf)
@@ -178,9 +183,12 @@ private[deploy] class ExecutorRunner(
 
       // Wait for it to exit; executor may exit with code 0 (when driver instructs it to shutdown)
       // or with nonzero exit code
+      //调用process的waitFor方法启动executor进程
       val exitCode = process.waitFor()
+      //拿到executor执行完后的状态
       state = ExecutorState.EXITED
       val message = "Command exited with code " + exitCode
+      //向executor所属的worker发送ExecutorStateChanged信息
       worker.send(ExecutorStateChanged(appId, execId, state, Some(message), Some(exitCode)))
     } catch {
       case interrupted: InterruptedException =>

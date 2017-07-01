@@ -73,6 +73,7 @@ private[spark] class WorkerInfo(
     memoryUsed += exec.memory
   }
 
+  //移除executor的信息以及所占用的资源
   def removeExecutor(exec: ExecutorDesc) {
     if (executors.contains(exec.fullId)) {
       executors -= exec.fullId

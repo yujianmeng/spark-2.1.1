@@ -97,6 +97,7 @@ private[spark] abstract class EventLoop[E](name: String) extends Logging {
 
   /**
    * Put the event into the event queue. The event thread will process it later.
+    *将事件加入事件队列
    */
   def post(event: E): Unit = {
     eventQueue.put(event)

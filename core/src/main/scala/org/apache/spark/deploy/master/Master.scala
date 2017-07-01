@@ -245,6 +245,7 @@ private[deploy] class Master(
         schedule()
       }
 
+      //接收worker向master发送的executorStateChanged信息
     case ExecutorStateChanged(appId, execId, state, message, exitStatus) =>
       val execOption = idToApp.get(appId).flatMap(app => app.executors.get(execId))
       execOption match {
@@ -261,20 +262,25 @@ private[deploy] class Master(
 
           exec.application.driver.send(ExecutorUpdated(execId, state, message, exitStatus, false))
 
+          //如果该executor状态为完成
           if (ExecutorState.isFinished(state)) {
             // Remove this executor from the worker and app
             logInfo(s"Removing executor ${exec.fullId} because it is $state")
             // If an application has already finished, preserve its
             // state to display its information properly on the UI
+            //如果这个app已经完成，则保留executor状态以在ui上显示其信息
             if (!appInfo.isFinished) {
               appInfo.removeExecutor(exec)
             }
+            //从worker中移除这个executor
             exec.worker.removeExecutor(exec)
 
             val normalExit = exitStatus == Some(0)
             // Only retry certain number of times so we don't go into an infinite loop.
             // Important note: this code path is not exercised by tests, so be very careful when
             // changing this `if` condition.
+            //如果executor是非正常的退出且重新调度的次数大于等于MAX_EXECUTOR_RETRIES所设定的阈值
+            //那么就判定这个app是运行失败的
             if (!normalExit
                 && appInfo.incrementRetryCount() >= MAX_EXECUTOR_RETRIES
                 && MAX_EXECUTOR_RETRIES >= 0) { // < 0 disables this application-killing path
@@ -282,17 +288,21 @@ private[deploy] class Master(
               if (!execs.exists(_.state == ExecutorState.RUNNING)) {
                 logError(s"Application ${appInfo.desc.name} with ID ${appInfo.id} failed " +
                   s"${appInfo.retryCount} times; removing it")
+                //将运行失败的app移除掉
                 removeApplication(appInfo, ApplicationState.FAILED)
               }
             }
           }
+          //进行资源调度，因为此时这个executor的资源已经释放出来，也许可以满足之前因资源不足而无法进行调度的drivers或者apps
           schedule()
         case None =>
           logWarning(s"Got status update for unknown executor $appId/$execId")
       }
 
+      //接收DriverStateChanged消息
     case DriverStateChanged(driverId, state, exception) =>
       state match {
+          //判断状态并把driver从master中移除
         case DriverState.ERROR | DriverState.FINISHED | DriverState.KILLED | DriverState.FAILED =>
           removeDriver(driverId, state, exception)
         case _ =>
@@ -609,11 +619,11 @@ private[deploy] class Master(
     val assignedCores = new Array[Int](numUsable) // Number of cores to give to each worker
     //每个worker上分配的executor数目
     val assignedExecutors = new Array[Int](numUsable) // Number of new executors on each worker
-    //需要分配的CPU，取app剩余需要需要的CPU和可分配workers的CPU总数的最小值
+    //需要分配的CPU，取app剩余需要的CPU数和可分配workers的CPU总数的最小值
     var coresToAssign = math.min(app.coresLeft, usableWorkers.map(_.coresFree).sum)
 
     /** Return whether the specified worker can launch an executor for this app. */
-    //该方法实际上是检测workers在经过分配之后是否还具有继续启动executor的能力
+    //该方法实际上是检测workers在经过分配之后是否还具有继续启动executor的资格
     def canLaunchExecutor(pos: Int): Boolean = {
       //是否需要继续调度（也就是所需要的所有CPU是否已经调度完）
       val keepScheduling = coresToAssign >= minCoresPerExecutor
@@ -622,7 +632,7 @@ private[deploy] class Master(
 
       // If we allow multiple executors per worker, then we can always launch new executors.
       // Otherwise, if there is already an executor on this worker, just give it more cores.
-      //如果运行多个executors在同一个worker上启动，我们将总是在这个worker上继续启动executor（知道其不能再启动）
+      //如果运行多个executors在同一个worker上启动，我们将总是在这个worker上继续启动executor（直到其不能再启动）
       //否则的话（也就是一个worker只能启动一个executor），如果worker上已经有了一个executor，则尽可能多的把CPU给它
 
       //判断当前worker是否可以继续启动executor
@@ -641,7 +651,8 @@ private[deploy] class Master(
       }
     }
 
-    // Keep launching executors until no more workers can accommodate any
+    // Keep launching executors until no more worke
+    // rs can accommodate any
     // more executors, or if we have reached this application's limits
     //持续的启动executors直到workers不能够容纳更多的executors，或者已经满足了当前app的要求
     //过滤不能为该app启动executors的workers
@@ -911,6 +922,7 @@ private[deploy] class Master(
     removeApplication(app, ApplicationState.FINISHED)
   }
 
+  //移除app的相关信息
   def removeApplication(app: ApplicationInfo, state: ApplicationState.Value) {
     if (apps.contains(app)) {
       logInfo("Removing app " + app.id)
@@ -1093,10 +1105,13 @@ private[deploy] class Master(
           completedDrivers.trimStart(toRemove)
         }
         completedDrivers += driver
+        //持久化的移除
         persistenceEngine.removeDriver(driver)
+        //状态的改变
         driver.state = finalState
         driver.exception = exception
         driver.worker.foreach(w => w.removeDriver(driver))
+        //进行资源调度，因为此时这个driver的资源已经释放出来，也许可以满足之前因资源不足而无法进行调度的drivers或者apps
         schedule()
       case None =>
         logWarning(s"Asked to remove unknown driver: $driverId")

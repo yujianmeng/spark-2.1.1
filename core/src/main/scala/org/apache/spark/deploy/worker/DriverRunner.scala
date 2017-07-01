@@ -77,8 +77,11 @@ private[deploy] class DriverRunner(
   }
 
   /** Starts a thread to run and manage the driver. */
+  //启用一个线程运行并管理driver
   private[worker] def start() = {
+    //这是一个Java线程
     new Thread("DriverRunner for " + driverId) {
+      //线程体
       override def run() {
         var shutdownHook: AnyRef = null
         try {
@@ -88,6 +91,8 @@ private[deploy] class DriverRunner(
           }
 
           // prepare driver jars and run driver
+          //准备driver所需要的jars和运行driver
+          //返回driver的退出状态
           val exitCode = prepareAndRunDriver()
 
           // set final state depending on if forcibly killed and process exit code
@@ -110,6 +115,7 @@ private[deploy] class DriverRunner(
         }
 
         // notify worker of final driver state, possible exception
+        //向worker发送一个DriverStateChanged的消息
         worker.send(DriverStateChanged(driverId, finalState.get, finalException))
       }
     }.start()
@@ -146,6 +152,7 @@ private[deploy] class DriverRunner(
    * Download the user jar into the supplied directory and return its local path.
    * Will throw an exception if there are errors downloading the jar.
    */
+  //下载用户的jar到提供的目录下并且返回它的本地路径，如果在下载过程中出现错误就会抛出异常
   private def downloadUserJar(driverDir: File): String = {
     val jarFileName = new URI(driverDesc.jarUrl).getPath.split("/").last
     val localJarFile = new File(driverDir, jarFileName)
@@ -168,7 +175,9 @@ private[deploy] class DriverRunner(
   }
 
   private[worker] def prepareAndRunDriver(): Int = {
+    //为driver创建工作目录
     val driverDir = createWorkingDirectory()
+    //下载用户上传的jar到工作目录（如果是Java，会用maven将其打包成jar包，如果是Scala，会用export将其导出为jar包）
     val localJarFilename = downloadUserJar(driverDir)
 
     def substituteVariables(argument: String): String = argument match {
@@ -178,6 +187,8 @@ private[deploy] class DriverRunner(
     }
 
     // TODO: If we add ability to submit multiple jars they should also be added here
+    //构建ProcessBuilder
+    //传入driver的启动命令等信息
     val builder = CommandUtils.buildProcessBuilder(driverDesc.command, securityManager,
       driverDesc.mem, sparkHome.getAbsolutePath, substituteVariables)
 
@@ -186,8 +197,10 @@ private[deploy] class DriverRunner(
 
   private def runDriver(builder: ProcessBuilder, baseDir: File, supervise: Boolean): Int = {
     builder.directory(baseDir)
+    //初始化ProcessBuilder
     def initialize(process: Process): Unit = {
       // Redirect stdout and stderr to files
+      //重定向stdout和stderr输出流到文件中
       val stdout = new File(baseDir, "stdout")
       CommandUtils.redirectStream(process.getInputStream, stdout)
 

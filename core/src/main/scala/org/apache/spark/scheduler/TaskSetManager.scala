@@ -47,6 +47,8 @@ import org.apache.spark.util.{AccumulatorV2, Clock, SystemClock, Utils}
  * @param maxTaskFailures if any particular task fails this number of times, the entire
  *                        task set will be aborted
  */
+//TaskSetManager会负责相应的TaskSet状态的监视和管理，负责追踪每一个Task，如果task运行失败，会负责重试task，直到
+//超过重试的次数，并且会为通过延迟调度为这个TaskSet处理本地化调度机制
 private[spark] class TaskSetManager(
     sched: TaskSchedulerImpl,
     val taskSet: TaskSet,

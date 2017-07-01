@@ -438,6 +438,7 @@ private[deploy] class Worker(
       registerWithMaster()
 
     case LaunchExecutor(masterUrl, appId, execId, appDesc, cores_, memory_) =>
+      //判断传入的master地址是否是当前为active的master
       if (masterUrl != activeMasterUrl) {
         logWarning("Invalid Master (" + masterUrl + ") attempted to launch executor.")
       } else {
@@ -445,6 +446,7 @@ private[deploy] class Worker(
           logInfo("Asked to launch executor %s/%d for %s".format(appId, execId, appDesc.name))
 
           // Create the executor's working directory
+          //创建executor的工作目录
           val executorDir = new File(workDir, appId + "/" + execId)
           if (!executorDir.mkdirs()) {
             throw new IOException("Failed to create directory " + executorDir)
@@ -453,6 +455,7 @@ private[deploy] class Worker(
           // Create local dirs for the executor. These are passed to the executor via the
           // SPARK_EXECUTOR_DIRS environment variable, and deleted by the Worker when the
           // application finishes.
+          //创建executor的本地目录，通过SPARK_EXECUTOR_DIRS的环境变量进行配置，当apps完成的时候这个目录将会被worker删除
           val appLocalDirs = appDirectories.getOrElse(appId,
             Utils.getOrCreateLocalRootDirs(conf).map { dir =>
               val appDir = Utils.createDirectory(dir, namePrefix = "executor")
@@ -460,6 +463,7 @@ private[deploy] class Worker(
               appDir.getAbsolutePath()
             }.toSeq)
           appDirectories(appId) = appLocalDirs
+          //构建ExecutorRunner
           val manager = new ExecutorRunner(
             appId,
             execId,
@@ -477,6 +481,7 @@ private[deploy] class Worker(
             conf,
             appLocalDirs, ExecutorState.RUNNING)
           executors(appId + "/" + execId) = manager
+          //通过ExecutorRunner启动executor
           manager.start()
           coresUsed += cores_
           memoryUsed += memory_
@@ -493,6 +498,7 @@ private[deploy] class Worker(
         }
       }
 
+      //接受Executor向worker发送的ExecutorStateChanged信息
     case executorStateChanged @ ExecutorStateChanged(appId, execId, state, message, exitStatus) =>
       handleExecutorStateChanged(executorStateChanged)
 
@@ -510,6 +516,7 @@ private[deploy] class Worker(
         }
       }
 
+      //启动driver
     case LaunchDriver(driverId, driverDesc) =>
       logInfo(s"Asked to launch driver $driverId")
       val driver = new DriverRunner(
@@ -524,6 +531,7 @@ private[deploy] class Worker(
       drivers(driverId) = driver
       driver.start()
 
+      //将分配给driver的资源加入到已用资源中
       coresUsed += driverDesc.cores
       memoryUsed += driverDesc.mem
 
@@ -536,6 +544,7 @@ private[deploy] class Worker(
           logError(s"Asked to kill unknown driver $driverId")
       }
 
+      //接收driverStateChanged消息
     case driverStateChanged @ DriverStateChanged(driverId, state, exception) =>
       handleDriverStateChanged(driverStateChanged)
 
@@ -632,10 +641,12 @@ private[deploy] class Worker(
     }
   }
 
+  //处理接受到的DriverStateChanged消息
   private[worker] def handleDriverStateChanged(driverStateChanged: DriverStateChanged): Unit = {
     val driverId = driverStateChanged.driverId
     val exception = driverStateChanged.exception
     val state = driverStateChanged.state
+    //对于不同的driver状态进行相应的处理
     state match {
       case DriverState.ERROR =>
         logWarning(s"Driver $driverId failed with unrecoverable exception: ${exception.get}")
@@ -648,16 +659,22 @@ private[deploy] class Worker(
       case _ =>
         logDebug(s"Driver $driverId changed state to $state")
     }
+    //向master发送driverStateChanged消息
     sendToMaster(driverStateChanged)
+    //将driver从本地缓存中移除
     val driver = drivers.remove(driverId).get
+    //将driver加入到finishedDrivers中
     finishedDrivers(driverId) = driver
     trimFinishedDriversIfNecessary()
+    //将driver的资源释放出来
     memoryUsed -= driver.driverDesc.mem
     coresUsed -= driver.driverDesc.cores
   }
 
+  //处理executor向worker发送的ExecutorStateChanged信息
   private[worker] def handleExecutorStateChanged(executorStateChanged: ExecutorStateChanged):
     Unit = {
+    //将ExecutorStateChanged信息发送给master
     sendToMaster(executorStateChanged)
     val state = executorStateChanged.state
     if (ExecutorState.isFinished(state)) {
