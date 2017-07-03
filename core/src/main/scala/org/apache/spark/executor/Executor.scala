@@ -292,6 +292,7 @@ private[spark] class Executor(
       startGCTime = computeTotalGcTime()
 
       try {
+        //获取所需要资源的列表
         val (taskFiles, taskJars, taskProps, taskBytes) =
           Task.deserializeWithDependencies(serializedTask)
 
@@ -299,7 +300,11 @@ private[spark] class Executor(
         // requires access to properties contained within (e.g. for access control).
         Executor.taskDeserializationProps.set(taskProps)
 
+        //利用网络从远程拉取所需要的文件和jar
         updateDependencies(taskFiles, taskJars)
+
+        //通过反序列化操作，将task的数据集反序列化回来
+        //在这里用到了Java的ClassLoader
         task = ser.deserialize[Task[Any]](taskBytes, Thread.currentThread.getContextClassLoader)
         task.localProperties = taskProps
         task.setTaskMemoryManager(taskMemoryManager)
@@ -318,12 +323,17 @@ private[spark] class Executor(
         env.mapOutputTracker.updateEpoch(task.epoch)
 
         // Run the actual task and measure its runtime.
+        //task开始的事件
         taskStart = System.currentTimeMillis()
         taskStartCpu = if (threadMXBean.isCurrentThreadCpuTimeSupported) {
           threadMXBean.getCurrentThreadCpuTime
         } else 0L
         var threwException = true
         val value = try {
+          //运行task
+          //这里的返回值对于shuffleMapTask来说就是MapStatus
+          //封装了ShuffleMapTask计算的数据输出的位置
+          //如果后面还是一个shuffleMapTask，那么就会去联系MapOutPutTracker来获取上一个ShuffleMapTask的输出位置，通过网络拉取数据，ResultTask也是一样的
           val res = task.run(
             taskAttemptId = taskId,
             attemptNumber = attemptNumber,
@@ -354,6 +364,7 @@ private[spark] class Executor(
             }
           }
         }
+        //task结束的时间
         val taskFinish = System.currentTimeMillis()
         val taskFinishCpu = if (threadMXBean.isCurrentThreadCpuTimeSupported) {
           threadMXBean.getCurrentThreadCpuTime
@@ -364,6 +375,7 @@ private[spark] class Executor(
           throw new TaskKilledException
         }
 
+        //这里其实是对MapStatus进行了一些序列化和封装，因为后面需要通过网络发送给Driver
         val resultSer = env.serializer.newInstance()
         val beforeSerialization = System.currentTimeMillis()
         val valueBytes = resultSer.serialize(value)
@@ -371,6 +383,7 @@ private[spark] class Executor(
 
         // Deserialization happens in two parts: first, we deserialize a Task object, which
         // includes the Partition. Second, Task.run() deserializes the RDD and function to be run.
+        //计算task的一些统计信息
         task.metrics.setExecutorDeserializeTime(
           (taskStart - deserializeStartTime) + task.executorDeserializeTime)
         task.metrics.setExecutorDeserializeCpuTime(
@@ -411,6 +424,7 @@ private[spark] class Executor(
           }
         }
 
+        //实际上调用Executor所在的所在的CoarseGrainedExecutorBackend的statusUpdate
         execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
 
       } catch {
@@ -642,10 +656,17 @@ private[spark] class Executor(
    * Download any missing dependencies if we receive a new set of files and JARs from the
    * SparkContext. Also adds any new JARs we fetched to the class loader.
    */
+  //通过网络将所需要的资源例如文件、jar等 拷贝过来
   private def updateDependencies(newFiles: HashMap[String, Long], newJars: HashMap[String, Long]) {
+    //获取Hadoop的配置文件
     lazy val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
+    //在这里实现了Java的多线程并发同步机制
+    //Task是以线程的形式运行的，在一个CoarseGrainedSchedulerBackend进程内并发运行，在执行业务逻辑的时候，会访问一些共享的资源
+    //就可能会出现多线程并发访问的安全问题
     synchronized {
       // Fetch missing dependencies
+      //遍历所需要的文件
+      //通过Utils.fetchFile方法利用网络从远程拉去文件
       for ((name, timestamp) <- newFiles if currentFiles.getOrElse(name, -1L) < timestamp) {
         logInfo("Fetching " + name + " with timestamp " + timestamp)
         // Fetch file with useCache mode, close cache for local mode.
@@ -653,6 +674,8 @@ private[spark] class Executor(
           env.securityManager, hadoopConf, timestamp, useCache = !isLocal)
         currentFiles(name) = timestamp
       }
+      //遍历所需要的jar
+      //通过Utils.fetchFile方法利用网络从远程拉去jar
       for ((name, timestamp) <- newJars) {
         val localName = name.split("/").last
         val currentTimeStamp = currentJars.get(name)

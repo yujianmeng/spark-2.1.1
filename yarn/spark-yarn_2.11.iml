@@ -105,7 +105,7 @@
     <orderEntry type="library" name="Maven: commons-lang:commons-lang:2.6" level="project" />
     <orderEntry type="library" name="Maven: org.apache.hadoop:hadoop-annotations:2.7.3" level="project" />
     <orderEntry type="module-library">
-      <library name="Maven: jdk.tools:jdk.tools:1.8">
+      <library name="Maven: jdk.tools:jdk.tools:1.7">
         <CLASSES>
           <root url="jar://E:/jdk1.8.0_121/lib/tools.jar!/" />
         </CLASSES>
@@ -196,7 +196,7 @@
     <orderEntry type="library" scope="TEST" name="Maven: log4j:apache-log4j-extras:1.2.17" level="project" />
     <orderEntry type="library" scope="TEST" name="Maven: org.antlr:antlr-runtime:3.4" level="project" />
     <orderEntry type="library" scope="TEST" name="Maven: org.antlr:stringtemplate:3.2.1" level="project" />
-    <orderEntry type="library" scope="TEST" name="12" level="project" />
+    <orderEntry type="library" scope="TEST" name="Maven: antlr:antlr:2.7.7" level="project" />
     <orderEntry type="library" scope="TEST" name="Maven: org.antlr:ST4:4.0.4" level="project" />
     <orderEntry type="library" name="Maven: org.apache.avro:avro:1.7.7" level="project" />
     <orderEntry type="library" name="Maven: com.thoughtworks.paranamer:paranamer:2.3" level="project" />

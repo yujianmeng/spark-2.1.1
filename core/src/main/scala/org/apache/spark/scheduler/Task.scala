@@ -76,6 +76,9 @@ private[spark] abstract class Task[T](
       attemptNumber: Int,
       metricsSystem: MetricsSystem): T = {
     SparkEnv.get.blockManager.registerTask(taskAttemptId)
+    //创建一个TaskContext，就是task的执行上下文
+    //里面记录了task执行的一些全局性的数据
+    //比如说task重试了几次、属于哪个stage、处理的RDD的哪个partition
     context = new TaskContextImpl(
       stageId,
       partitionId,
@@ -96,6 +99,7 @@ private[spark] abstract class Task[T](
       Option(taskAttemptId), Option(attemptNumber)).setCurrentContext()
 
     try {
+      //调用抽象方法runTask
       runTask(context)
     } catch {
       case e: Throwable =>
@@ -134,6 +138,9 @@ private[spark] abstract class Task[T](
     this.taskMemoryManager = taskMemoryManager
   }
 
+  //调用到了抽象方法，那就意味着这个类只是一个模板类或者抽象父类
+  //仅仅封装了一些子类通用的数据和方法，而关键的方法全都依赖于子类的实现
+  //在spark中task的子类有ShuffleMapTask和ResultTask
   def runTask(context: TaskContext): T
 
   def preferredLocations: Seq[TaskLocation] = Nil
@@ -263,6 +270,7 @@ private[spark] object Task {
     val dataIn = new DataInputStream(in)
 
     // Read task's files
+    //获取task所需要的文件
     val taskFiles = new HashMap[String, Long]()
     val numFiles = dataIn.readInt()
     for (i <- 0 until numFiles) {
@@ -270,6 +278,7 @@ private[spark] object Task {
     }
 
     // Read task's JARs
+    //获取task所需要的jar
     val taskJars = new HashMap[String, Long]()
     val numJars = dataIn.readInt()
     for (i <- 0 until numJars) {

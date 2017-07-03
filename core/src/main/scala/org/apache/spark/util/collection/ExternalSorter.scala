@@ -162,6 +162,7 @@ private[spark] class ExternalSorter[K, V, C](
   // Information about a spilled file. Includes sizes in bytes of "batches" written by the
   // serializer as we periodically reset its stream, as well as number of elements in each
   // partition, used to efficiently keep track of partitions when merging.
+  //溢出文件信息
   private[this] case class SpilledFile(
     file: File,
     blockId: BlockId,
@@ -186,20 +187,29 @@ private[spark] class ExternalSorter[K, V, C](
       val createCombiner = aggregator.get.createCombiner
       var kv: Product2[K, V] = null
       val update = (hadValue: Boolean, oldValue: C) => {
+        //如果遇到记录过的相同key，就将value使用传入的aggregator进行聚合，
+        // 如果遇到一个新key，就将该key对应的value计入一个新的combiner中
         if (hadValue) mergeValue(oldValue, kv._2) else createCombiner(kv._2)
       }
       while (records.hasNext) {
+        //循环处理records中的每一条记录，处理一条记录就在addElementsRead()中将_elementsRead加1，记录处理的记录数，然后更新map中的值。
         addElementsRead()
         kv = records.next()
-        map.changeValue((getPartition(kv._1), kv._1), update)
+        //将数据加入PartitionedAppendOnlyMap
+        map.changeValue((getPartition(kv._1), kv._1), update) //这里传入的update是一个方法
+        //决定是否需要spill
+        //usingMap是用来标识使用的是map还是buffer对象
         maybeSpillCollection(usingMap = true)
       }
     } else {
       // Stick values into our buffer
       while (records.hasNext) {
+        //处理一条记录就在addElementsRead()中将_elementsRead加1
         addElementsRead()
         val kv = records.next()
+        //将数据存入buffer
         buffer.insert(getPartition(kv._1), kv._1, kv._2.asInstanceOf[C])
+        //决定是否需要spill
         maybeSpillCollection(usingMap = false)
       }
     }
@@ -209,7 +219,9 @@ private[spark] class ExternalSorter[K, V, C](
    * Spill the current in-memory collection to disk if needed.
    *
    * @param usingMap whether we're using a map or buffer as our current in-memory collection
+    *usingMap是用来标识使用的是map还是buffer对象
    */
+
   private def maybeSpillCollection(usingMap: Boolean): Unit = {
     var estimatedSize = 0L
     if (usingMap) {
@@ -218,8 +230,11 @@ private[spark] class ExternalSorter[K, V, C](
         map = new PartitionedAppendOnlyMap[K, C]
       }
     } else {
+      //计算当前buffer的内存大小
       estimatedSize = buffer.estimateSize()
+      //根据该大小调用方法maybeSpill判断是否需要进行spill操作
       if (maybeSpill(buffer, estimatedSize)) {
+        //清空buffer
         buffer = new PartitionedPairBuffer[K, C]
       }
     }
@@ -235,9 +250,11 @@ private[spark] class ExternalSorter[K, V, C](
    *
    * @param collection whichever collection we're using (map or buffer)
    */
+  //将内存中的数据溢出到已排序文件中（之后会将多个文件进行合并）
   override protected[this] def spill(collection: WritablePartitionedPairCollection[K, C]): Unit = {
     val inMemoryIterator = collection.destructiveSortedWritablePartitionedIterator(comparator)
     val spillFile = spillMemoryIteratorToDisk(inMemoryIterator)
+    //将文件信息加入spills中
     spills += spillFile
   }
 
@@ -676,7 +693,8 @@ private[spark] class ExternalSorter[K, V, C](
   /**
    * Write all the data added into this ExternalSorter into a file in the disk store. This is
    * called by the SortShuffleWriter.
-   *
+   *将所有的数据写入到一个磁盘文件中
+    *
    * @param blockId block ID to write to. The index file will be blockId.name + ".index".
    * @return array of lengths, in bytes, of each partition of the file (used by map output tracker)
    */
@@ -691,6 +709,7 @@ private[spark] class ExternalSorter[K, V, C](
 
     if (spills.isEmpty) {
       // Case where we only have in-memory data
+      //这种情况下我们只在内存中存在数据
       val collection = if (aggregator.isDefined) map else buffer
       val it = collection.destructiveSortedWritablePartitionedIterator(comparator)
       while (it.hasNext) {

@@ -284,6 +284,7 @@ abstract class RDD[T: ClassTag](
     if (storageLevel != StorageLevel.NONE) {
       getOrCompute(split, context)
     } else {
+      //进行RDD partition的计算
       computeOrReadCheckpoint(split, context)
     }
   }
@@ -320,6 +321,7 @@ abstract class RDD[T: ClassTag](
     if (isCheckpointedAndMaterialized) {
       firstParent[T].iterator(split, context)
     } else {
+      //这是一个抽象方法，执行我们自己定义的算子，具体看MapPartitionRDD
       compute(split, context)
     }
   }

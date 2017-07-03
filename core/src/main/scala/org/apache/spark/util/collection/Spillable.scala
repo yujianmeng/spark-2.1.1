@@ -94,6 +94,8 @@ private[spark] abstract class Spillable[C](taskMemoryManager: TaskMemoryManager)
     if (shouldSpill) {
       _spillCount += 1
       logSpillage(currentMemory)
+      //将内存中的数据刷入到磁盘文件中
+      //这里调用的实际上是ExternalSorter中的spill方法，其继承了Spillable这个抽象类并实现了spill方法
       spill(collection)
       _elementsRead = 0
       _memoryBytesSpilled += currentMemory
