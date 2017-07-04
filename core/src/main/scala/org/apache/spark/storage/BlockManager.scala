@@ -61,6 +61,8 @@ private[spark] class BlockResult(
  *
  * Note that [[initialize()]] must be called before the BlockManager is usable.
  */
+
+//BlockManager运行在每个节点上，主要提供了在本地或者远程存取数据的功能，支持内存、磁盘
 private[spark] class BlockManager(
     executorId: String,
     rpcEnv: RpcEnv,
@@ -164,6 +166,8 @@ private[spark] class BlockManager(
    * service if configured.
    */
   def initialize(appId: String): Unit = {
+
+    //初始化用于进行远程数据传输的blockTransferService
     blockTransferService.init(this)
     shuffleClient.init(appId)
 
@@ -176,9 +180,12 @@ private[spark] class BlockManager(
       ret
     }
 
+    //为当前这个BlockManager创建一个唯一的BlockManagerId
     val id =
       BlockManagerId(executorId, blockTransferService.hostName, blockTransferService.port, None)
 
+
+    //向BlockManagerMaster注册该BlockManager,发送RegisterBlockManager消息
     val idFromMaster = master.registerBlockManager(
       id,
       maxMemory,
@@ -489,6 +496,7 @@ private[spark] class BlockManager(
   /**
    * Get block from the local block manager as serialized bytes.
    */
+  //从本地获取数据
   def getLocalBytes(blockId: BlockId): Option[ChunkedByteBuffer] = {
     logDebug(s"Getting local block $blockId as bytes")
     // As an optimization for map output fetches, if the block is for a shuffle, return it

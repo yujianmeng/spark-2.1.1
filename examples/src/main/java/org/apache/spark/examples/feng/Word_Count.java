@@ -1,4 +1,4 @@
-package org.apache.spark.examples;
+package org.apache.spark.examples.feng;
 
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;

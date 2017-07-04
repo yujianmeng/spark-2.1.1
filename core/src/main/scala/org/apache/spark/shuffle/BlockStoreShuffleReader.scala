@@ -41,24 +41,34 @@ private[spark] class BlockStoreShuffleReader[K, C](
   private val dep = handle.dependency
 
   /** Read the combined key-values for this reduce task */
+  //从reduce task的角度讲，我们读取Key-value的集合，因为同样的Key分布在很多很多节点上，由不同的ShuffleMapTask计算产生
   override def read(): Iterator[Product2[K, C]] = {
+
+    //ShuffleBlockFetcherIterator就是一个阅读器
     val blockFetcherItr = new ShuffleBlockFetcherIterator(
       context,
       blockManager.shuffleClient,
+      //blockManager是内存和磁盘上数据读写的统一管理器
       blockManager,
+      //获取数据存储位置
       mapOutputTracker.getMapSizesByExecutorId(handle.shuffleId, startPartition, endPartition),
       // Note: we use getSizeAsMb when no suffix is provided for backwards compatibility
+      //每次最大可以读取多少数据，默认是48M
       SparkEnv.get.conf.getSizeAsMb("spark.reducer.maxSizeInFlight", "48m") * 1024 * 1024,
+      //是从远程节点请求块的数量，这里是无限次
       SparkEnv.get.conf.getInt("spark.reducer.maxReqsInFlight", Int.MaxValue))
 
     // Wrap the streams for compression and encryption based on configuration
+    //blockFetcherItr实例类通过map转换，基于压缩和加密，构建一个wrappedStreams包装流
     val wrappedStreams = blockFetcherItr.map { case (blockId, inputStream) =>
       serializerManager.wrapStream(blockId, inputStream)
     }
 
+    //构建序列化器
     val serializerInstance = dep.serializer.newInstance()
 
     // Create a key/value iterator for each stream
+    //对于每个wrappedStreams生成一个key-value类型的迭代器recordIter
     val recordIter = wrappedStreams.flatMap { wrappedStream =>
       // Note: the asKeyValueIterator below wraps a key/value iterator inside of a
       // NextIterator. The NextIterator makes sure that close() is called on the
@@ -67,6 +77,7 @@ private[spark] class BlockStoreShuffleReader[K, C](
     }
 
     // Update the context task metrics for each record read.
+    //每条记录读取以后，要更新Metrics，这样在WEB UI控制台或者交互式控制台上看到相关的信息
     val readMetrics = context.taskMetrics.createTempShuffleReadMetrics()
     val metricIter = CompletionIterator[(Any, Any), Iterator[(Any, Any)]](
       recordIter.map { record =>
@@ -78,7 +89,12 @@ private[spark] class BlockStoreShuffleReader[K, C](
     // An interruptible iterator must be used here in order to support task cancellation
     val interruptibleIter = new InterruptibleIterator[(Any, Any)](context, metricIter)
 
-    val aggregatedIter: Iterator[Product2[K, C]] = if (dep.aggregator.isDefined) {
+    //aggregatedIter判断在map端进行聚合怎么做；不在map端聚合怎么做
+    val aggregatedIter: Iterator[Product2[K, C]] = if (dep.aggregator.isDefined) {  //首先判断aggregator是否被定义
+
+      /*再判断map端是否需聚合，我们谈的是Reducer端，为什么这里需在Mapper端进行聚合呢？
+      原因很简单：Reducer可能还有下一个Stage，如果还有下一个Stage的话，那这个Reducer至于下一个Stage而言，
+      其实就是Mapper，是Mapper就需考虑在本地是否需进行聚合*/
       if (dep.mapSideCombine) {
         // We are reading values that are already combined
         val combinedKeyValuesIterator = interruptibleIter.asInstanceOf[Iterator[(K, C)]]
@@ -91,11 +107,13 @@ private[spark] class BlockStoreShuffleReader[K, C](
         dep.aggregator.get.combineValuesByKey(keyValuesIterator, context)
       }
     } else {
+      //aggregator.isDefined没定义，则出错提示
       require(!dep.mapSideCombine, "Map-side combine without Aggregator specified!")
       interruptibleIter.asInstanceOf[Iterator[Product2[K, C]]]
     }
 
     // Sort the output if there is a sort ordering defined.
+    //dep.keyOrdering是否对输出结果进行排序：根据传进来的keyOrdering进行判断，如果进行排序，new出来一个ExternalSorter
     dep.keyOrdering match {
       case Some(keyOrd: Ordering[K]) =>
         // Create an ExternalSorter to sort the data. Note that if spark.shuffle.spill is disabled,

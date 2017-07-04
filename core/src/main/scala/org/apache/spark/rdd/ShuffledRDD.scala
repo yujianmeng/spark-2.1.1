@@ -103,8 +103,13 @@ class ShuffledRDD[K: ClassTag, V: ClassTag, C: ClassTag](
     tracker.getPreferredLocationsForShuffle(dep, partition.index)
   }
 
+  //拉取shuffle的数据，计算分区partition
   override def compute(split: Partition, context: TaskContext): Iterator[(K, C)] = {
+    //获得Shuffle级别的依赖关系
     val dep = dependencies.head.asInstanceOf[ShuffleDependency[K, V, C]]
+    //SparkEnv.get.shuffleManager获得SortShuffleManage
+    //SparkEnv.get.shuffleManager.getReader是获取ShuffledRDD的阅读器，阅读器核心作用是读取分布在不同节点上ShuffleMapTask计算的结果的数据
+    //getReader实际上是获取一个BlockStoreShuffleReader，然后再调用BlockStoreShuffleReader的read方法
     SparkEnv.get.shuffleManager.getReader(dep.shuffleHandle, split.index, split.index + 1, context)
       .read()
       .asInstanceOf[Iterator[(K, C)]]
